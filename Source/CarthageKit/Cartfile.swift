@@ -8,7 +8,7 @@
 
 import Foundation
 import Result
-import ReactiveCocoa
+import ReactiveSwift
 import Tentacle
 
 /// The relative path to a project's checked out dependencies.
@@ -18,21 +18,22 @@ public let CarthageProjectCheckoutsPath = "Carthage/Checkouts"
 /// and any other settings Carthage needs to build it.
 public struct Cartfile {
 	/// The dependencies listed in the Cartfile.
-	public var dependencies: [Dependency<VersionSpecifier>]
+	public var dependencies: [Dependency: VersionSpecifier]
 
-	public init(dependencies: [Dependency<VersionSpecifier>] = []) {
+	public init(dependencies: [Dependency: VersionSpecifier] = [:]) {
 		self.dependencies = dependencies
 	}
 
 	/// Returns the location where Cartfile should exist within the given
 	/// directory.
-	public static func urlInDirectory(directoryURL: URL) -> URL {
+	public static func url(in directoryURL: URL) -> URL {
 		return directoryURL.appendingPathComponent("Cartfile")
 	}
 
 	/// Attempts to parse Cartfile information from a string.
-	public static func fromString(string: String) -> Result<Cartfile, CarthageError> {
-		var cartfile = self.init()
+	public static func from(string: String) -> Result<Cartfile, CarthageError> {
+		var dependencies: [Dependency: VersionSpecifier] = [:]
+		var duplicates: [Dependency] = []
 		var result: Result<(), CarthageError> = .success(())
 
 		let commentIndicator = "#"
@@ -49,13 +50,23 @@ public struct Cartfile {
 				return
 			}
 
-			switch Dependency<VersionSpecifier>.from(scanner) {
-			case let .Success(dep):
-				cartfile.dependencies.append(dep)
+			switch Dependency.from(scanner).fanout(VersionSpecifier.from(scanner)) {
+			case let .success((dependency, version)):
+				if case .binary = dependency, case .gitReference = version {
+					result = .failure(CarthageError.parseError(description: "binary dependencies cannot have a git reference for the version specifier in line: \(scanner.currentLine)"))
+					stop = true
+					return
+				}
+				if dependencies[dependency] == nil {
+					dependencies[dependency] = version
+				} else {
+					duplicates.append(dependency)
+				}
 
-			case let .Failure(error):
-				result = .failure(error)
+			case let .failure(error):
+				result = .failure(CarthageError(scannableError: error))
 				stop = true
+				return
 			}
 
 			if scanner.scanString(commentIndicator, into: nil) {
@@ -69,126 +80,122 @@ public struct Cartfile {
 			}
 		}
 
-		return result.map { _ in cartfile }
+		return result.flatMap { _ in
+			if !duplicates.isEmpty {
+				return .failure(.duplicateDependencies(duplicates.map { DuplicateDependency(dependency: $0, locations: []) }))
+			}
+			return .success(Cartfile(dependencies: dependencies))
+		}
 	}
 
 	/// Attempts to parse a Cartfile from a file at a given URL.
-	public static func fromFile(cartfileURL: URL) -> Result<Cartfile, CarthageError> {
+	public static func from(file cartfileURL: URL) -> Result<Cartfile, CarthageError> {
 		do {
-			let cartfileContents = try String(contentsOfURL: cartfileURL, encoding: NSUTF8StringEncoding)
-			return Cartfile.fromString(cartfileContents)
+			let cartfileContents = try String(contentsOf: cartfileURL, encoding: .utf8)
+			return Cartfile
+				.from(string: cartfileContents)
+				.mapError { error in
+					guard case let .duplicateDependencies(dupes) = error else {
+						return error
+					}
+					
+					let dependencies = dupes
+						.map { dupe in
+							return DuplicateDependency(
+								dependency: dupe.dependency,
+								locations: [ cartfileURL.path ]
+							)
+						}
+					return .duplicateDependencies(dependencies)
+				}
 		} catch let error as NSError {
 			return .failure(CarthageError.readFailed(cartfileURL, error))
 		}
 	}
 
 	/// Appends the contents of another Cartfile to that of the receiver.
-	public mutating func appendCartfile(cartfile: Cartfile) {
-		dependencies += cartfile.dependencies
+	public mutating func append(_ cartfile: Cartfile) {
+		for (dependency, version) in cartfile.dependencies {
+			dependencies[dependency] = version
+		}
 	}
 }
 
-extension Cartfile: CustomStringConvertible {
-	public var description: String {
-		return dependencies.description
-	}
-}
-
-// Duplicate dependencies
-extension Cartfile {
-	/// Returns an array containing projects that are listed as duplicate
-	/// dependencies.
-	public func duplicateProjects() -> [ProjectIdentifier] {
-		return self.dependencyCountedSet.filter { $0.1 > 1 }
-			.map { $0.0 }
-	}
-
-	/// Returns the dependencies in a cartfile as a counted set containing the
-	/// corresponding projects, represented as a dictionary.
-	private var dependencyCountedSet: [ProjectIdentifier: Int] {
-		return buildCountedSet(self.dependencies.map { $0.project })
-	}
-}
-
-/// Returns an array containing projects that are listed as dependencies
-/// in both arguments.
-public func duplicateProjectsInCartfiles(cartfile1: Cartfile, _ cartfile2: Cartfile) -> [ProjectIdentifier] {
-	let projectSet1 = cartfile1.dependencyCountedSet
-
-	return cartfile2.dependencies
-		.map { $0.project }
-		.filter { projectSet1[$0] != nil }
+/// Returns an array containing dependencies that are listed in both arguments.
+public func duplicateDependenciesIn(_ cartfile1: Cartfile, _ cartfile2: Cartfile) -> [Dependency] {
+	let projects1 = cartfile1.dependencies.keys
+	let projects2 = cartfile2.dependencies.keys
+	return Array(Set(projects1).intersection(Set(projects2)))
 }
 
 /// Represents a parsed Cartfile.resolved, which specifies which exact version was
 /// checked out for each dependency.
 public struct ResolvedCartfile {
-	/// The dependencies listed in the Cartfile.resolved, in the order that they
-	/// should be built.
-	public var dependencies: [Dependency<PinnedVersion>]
-
-	public init(dependencies: [Dependency<PinnedVersion>]) {
+	/// The dependencies listed in the Cartfile.resolved.
+	public var dependencies: [Dependency: PinnedVersion]
+	
+	public init(dependencies: [Dependency: PinnedVersion]) {
 		self.dependencies = dependencies
 	}
 
 	/// Returns the location where Cartfile.resolved should exist within the given
 	/// directory.
-	public static func urlInDirectory(directoryURL: URL) -> URL {
+	public static func url(in directoryURL: URL) -> URL {
 		return directoryURL.appendingPathComponent("Cartfile.resolved")
 	}
 
 	/// Attempts to parse Cartfile.resolved information from a string.
-	public static func fromString(string: String) -> Result<ResolvedCartfile, CarthageError> {
-		var cartfile = self.init(dependencies: [])
+	public static func from(string: String) -> Result<ResolvedCartfile, CarthageError> {
+		var cartfile = self.init(dependencies: [:])
 		var result: Result<(), CarthageError> = .success(())
 
 		let scanner = Scanner(string: string)
 		scannerLoop: while !scanner.isAtEnd {
-			switch Dependency<PinnedVersion>.from(scanner) {
-			case let .Success(dep):
-				cartfile.dependencies.append(dep)
+			switch Dependency.from(scanner).fanout(PinnedVersion.from(scanner)) {
+			case let .success((dep, version)):
+				cartfile.dependencies[dep] = version
 
-			case let .Failure(error):
-				result = .failure(error)
+			case let .failure(error):
+				result = .failure(CarthageError(scannableError: error))
 				break scannerLoop
 			}
 		}
 
 		return result.map { _ in cartfile }
 	}
-
-	/// Returns the dependency whose project matches the given project or nil.
-	internal func dependencyForProject(project: ProjectIdentifier) -> Dependency<PinnedVersion>? {
-		return dependencies.lazy
-			.filter { $0.project == project }
-			.first
-	}
 }
 
 extension ResolvedCartfile: CustomStringConvertible {
 	public var description: String {
-		return dependencies.reduce("") { (string, dependency) in
-			return string + "\(dependency)\n"
-		}
+		return dependencies
+			.sorted { $0.key.description < $1.key.description }
+			.map { "\($0.key) \($0.value)\n" }
+			.joined(separator: "")
 	}
 }
 
 /// Uniquely identifies a project that can be used as a dependency.
-public enum ProjectIdentifier: Comparable {
-	/// A repository hosted on GitHub.com.
-	case gitHub(Repository)
+public enum Dependency {
+	/// A repository hosted on GitHub.com or GitHub Enterprise.
+	case gitHub(Server, Repository)
 
 	/// An arbitrary Git repository.
 	case git(GitURL)
 
+	/// A binary-only framework
+	case binary(URL)
+
 	/// The unique, user-visible name for this project.
 	public var name: String {
 		switch self {
-		case let .gitHub(repo):
+		case let .gitHub(_, repo):
 			return repo.name
 
 		case let .git(url):
 			return url.name ?? url.urlString
+
+		case let .binary(url):
+			return url.lastPathComponent.stripping(suffix: ".json")
 		}
 	}
 
@@ -199,118 +206,129 @@ public enum ProjectIdentifier: Comparable {
 	}
 }
 
-public func ==(lhs: ProjectIdentifier, rhs: ProjectIdentifier) -> Bool {
-	switch (lhs, rhs) {
-	case let (.gitHub(left), .gitHub(right)):
-		return left == right
+extension Dependency: Comparable {
+	public static func ==(_ lhs: Dependency, _ rhs: Dependency) -> Bool {
+		switch (lhs, rhs) {
+		case let (.gitHub(left), .gitHub(right)):
+			return left == right
 
-	case let (.git(left), .git(right)):
-		return left == right
+		case let (.git(left), .git(right)):
+			return left == right
 
-	default:
-		return false
+		case let (.binary(left), .binary(right)):
+			return left == right
+
+		default:
+			return false
+		}
+	}
+
+	public static func <(_ lhs: Dependency, _ rhs: Dependency) -> Bool {
+		return lhs.name.caseInsensitiveCompare(rhs.name) == .orderedAscending
 	}
 }
 
-public func <(lhs: ProjectIdentifier, rhs: ProjectIdentifier) -> Bool {
-	return lhs.name.caseInsensitiveCompare(rhs.name) == .orderedAscending
-}
-
-extension ProjectIdentifier: Hashable {
+extension Dependency: Hashable {
 	public var hashValue: Int {
 		switch self {
-		case let .gitHub(repo):
-			return repo.hashValue
+		case let .gitHub(server, repo):
+			return server.hashValue ^ repo.hashValue
 
 		case let .git(url):
+			return url.hashValue
+
+		case let .binary(url):
 			return url.hashValue
 		}
 	}
 }
 
-extension ProjectIdentifier: Scannable {
-	/// Attempts to parse a ProjectIdentifier.
-	public static func from(_ scanner: Scanner) -> Result<ProjectIdentifier, CarthageError> {
-		let parser: (String) -> Result<ProjectIdentifier, CarthageError>
+extension Dependency: Scannable {
+	/// Attempts to parse a Dependency.
+	public static func from(_ scanner: Scanner) -> Result<Dependency, ScannableError> {
+		let parser: (String) -> Result<Dependency, ScannableError>
 
 		if scanner.scanString("github", into: nil) {
 			parser = { repoIdentifier in
-				return Repository.fromIdentifier(repoIdentifier).map { self.gitHub($0) }
+				return Repository.fromIdentifier(repoIdentifier).map { self.gitHub($0, $1) }
 			}
 		} else if scanner.scanString("git", into: nil) {
 			parser = { urlString in
 				return .success(self.git(GitURL(urlString)))
 			}
+		} else if scanner.scanString("binary", into: nil) {
+			parser = { urlString in
+				if let url = URL(string: urlString) {
+					if url.scheme == "https" {
+						return .success(self.binary(url))
+					} else {
+						return .failure(ScannableError(message: "non-https URL found for dependency type `binary`", currentLine: scanner.currentLine))
+					}
+				} else {
+					return .failure(ScannableError(message: "invalid URL found for dependency type `binary`", currentLine: scanner.currentLine))
+				}
+			}
 		} else {
-			return .failure(CarthageError.parseError(description: "unexpected dependency type in line: \(scanner.currentLine)"))
+			return .failure(ScannableError(message: "unexpected dependency type", currentLine: scanner.currentLine))
 		}
 
 		if !scanner.scanString("\"", into: nil) {
-			return .failure(CarthageError.parseError(description: "expected string after dependency type in line: \(scanner.currentLine)"))
+			return .failure(ScannableError(message: "expected string after dependency type", currentLine: scanner.currentLine))
 		}
 
 		var address: NSString? = nil
 		if !scanner.scanUpTo("\"", into: &address) || !scanner.scanString("\"", into: nil) {
-			return .failure(CarthageError.parseError(description: "empty or unterminated string after dependency type in line: \(scanner.currentLine)"))
+			return .failure(ScannableError(message: "empty or unterminated string after dependency type", currentLine: scanner.currentLine))
 		}
 
 		if let address = address {
 			return parser(address as String)
 		} else {
-			return .failure(CarthageError.parseError(description: "empty string after dependency type in line: \(scanner.currentLine)"))
-		}
-	}
-}
-
-extension ProjectIdentifier: CustomStringConvertible {
-	public var description: String {
-		switch self {
-		case let .gitHub(repo):
-			let repoDescription: String
-			switch repo.server {
-			case .DotCom:
-				repoDescription = "\(repo.owner)/\(repo.name)"
-
-			case .Enterprise:
-				repoDescription = "\(repo.URL)"
-			}
-			return "github \"\(repoDescription)\""
-
-		case let .git(url):
-			return "git \"\(url)\""
-		}
-	}
-}
-
-/// Represents a single dependency of a project.
-public struct Dependency<V: VersionType>: Equatable {
-	/// The project corresponding to this dependency.
-	public let project: ProjectIdentifier
-
-	/// The version(s) that are required to satisfy this dependency.
-	public var version: V
-
-	public init(project: ProjectIdentifier, version: V) {
-		self.project = project
-		self.version = version
-	}
-}
-
-public func ==<V>(lhs: Dependency<V>, rhs: Dependency<V>) -> Bool {
-	return lhs.project == rhs.project && lhs.version == rhs.version
-}
-
-extension Dependency where V: Scannable {
-	/// Attempts to parse a Dependency specification.
-	public static func from(_ scanner: Scanner) -> Result<Dependency, CarthageError> {
-		return ProjectIdentifier.from(scanner).flatMap { identifier in
-			return V.from(scanner).map { specifier in self.init(project: identifier, version: specifier) }
+			return .failure(ScannableError(message: "empty string after dependency type", currentLine: scanner.currentLine))
 		}
 	}
 }
 
 extension Dependency: CustomStringConvertible {
 	public var description: String {
-		return "\(project) \(version)"
+		switch self {
+		case let .gitHub(server, repo):
+			let repoDescription: String
+			switch server {
+			case .dotCom:
+				repoDescription = "\(repo.owner)/\(repo.name)"
+
+			case .enterprise:
+				repoDescription = "\(server.url(for: repo))"
+			}
+			return "github \"\(repoDescription)\""
+
+		case let .git(url):
+			return "git \"\(url)\""
+
+		case let .binary(url):
+			return "binary \"\(url.absoluteString)\""
+		}
 	}
+}
+
+extension Dependency {
+
+	/// Returns the URL that the dependency's remote repository exists at.
+	func gitURL(preferHTTPS: Bool) -> GitURL? {
+		switch self {
+		case let .gitHub(server, repository):
+			if preferHTTPS {
+				return server.httpsURL(for: repository)
+			} else {
+				return server.sshURL(for: repository)
+			}
+
+		case let .git(url):
+			return url
+		case .binary:
+			return nil
+		}
+	}
+	
 }

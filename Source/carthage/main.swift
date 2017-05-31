@@ -9,7 +9,7 @@
 import CarthageKit
 import Commandant
 import Foundation
-import ReactiveCocoa
+import ReactiveSwift
 import ReactiveTask
 import Result
 
@@ -20,10 +20,8 @@ guard ensureGitVersion().first()?.value == true else {
 	exit(EXIT_FAILURE)
 }
 
-if let remoteVersion = remoteVersion() where localVersion() < remoteVersion {
-	
-	let formatting = ColorOptions.Formatting(true)
-	carthage.println(formatting.bullets + "Please update to the latest Carthage version: \(remoteVersion). You currently are on \(localVersion())")
+if let remoteVersion = remoteVersion(), localVersion() < remoteVersion {
+	fputs("Please update to the latest Carthage version: \(remoteVersion). You currently are on \(localVersion())" + "\n", stderr)
 }
 
 if let carthagePath = Bundle.main.executablePath {

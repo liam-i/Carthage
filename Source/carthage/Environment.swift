@@ -10,7 +10,7 @@ import CarthageKit
 import Foundation
 import Result
 
-internal func getEnvironmentVariable(variable: String) -> Result<String, CarthageError> {
+internal func getEnvironmentVariable(_ variable: String) -> Result<String, CarthageError> {
 	let environment = ProcessInfo.processInfo.environment
 
 	if let value = environment[variable] {
@@ -29,7 +29,7 @@ internal struct Terminal {
 	
 	/// Whether terminal type is `dumb`.
 	static var isDumb: Bool {
-		return (terminalType?.caseInsensitiveCompare("dumb") == .orderedSame) ?? false
+		return terminalType?.caseInsensitiveCompare("dumb") == .orderedSame
 	}
 	
 	/// Whether STDOUT is a TTY.

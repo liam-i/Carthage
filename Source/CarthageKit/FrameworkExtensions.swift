@@ -8,7 +8,7 @@
 
 import Foundation
 import Result
-import ReactiveCocoa
+import ReactiveSwift
 
 extension String {
 	/// Returns a producer that will enumerate each line of the receiver, then
@@ -26,10 +26,20 @@ extension String {
 			observer.sendCompleted()
 		}
 	}
+
+	/// Strips off a trailing string, if present.
+	internal func stripping(suffix: String) -> String {
+		if hasSuffix(suffix) {
+			let end = characters.index(endIndex, offsetBy: -suffix.characters.count)
+			return self[startIndex..<end]
+		} else {
+			return self
+		}
+	}
 }
 
 /// Merges `rhs` into `lhs` and returns the result.
-internal func combineDictionaries<K, V>(lhs: [K: V], rhs: [K: V]) -> [K: V] {
+internal func combineDictionaries<K, V>(_ lhs: [K: V], rhs: [K: V]) -> [K: V] {
 	var result = lhs
 	for (key, value) in rhs {
 		result.updateValue(value, forKey: key)
@@ -41,7 +51,7 @@ internal func combineDictionaries<K, V>(lhs: [K: V], rhs: [K: V]) -> [K: V] {
 extension SignalProtocol {
 	/// Sends each value that occurs on `signal` combined with each value that
 	/// occurs on `otherSignal` (repeats included).
-	private func permute<U>(with otherSignal: Signal<U, Error>) -> Signal<(Value, U), Error> {
+	fileprivate func permute<U>(with otherSignal: Signal<U, Error>) -> Signal<(Value, U), Error> {
 		return Signal { observer in
 			let lock = NSLock()
 			lock.name = "org.carthage.CarthageKit.permute"
@@ -55,7 +65,7 @@ extension SignalProtocol {
 
 			compositeDisposable += self.observe { event in
 				switch event {
-				case let .Next(value):
+				case let .value(value):
 					lock.lock()
 
 					signalValues.append(value)
@@ -65,10 +75,10 @@ extension SignalProtocol {
 
 					lock.unlock()
 
-				case let .Failed(error):
+				case let .failed(error):
 					observer.send(error: error)
 
-				case .Completed:
+				case .completed:
 					lock.lock()
 
 					signalCompleted = true
@@ -78,14 +88,14 @@ extension SignalProtocol {
 
 					lock.unlock()
 
-				case .Interrupted:
+				case .interrupted:
 					observer.sendInterrupted()
 				}
 			}
 
 			compositeDisposable += otherSignal.observe { event in
 				switch event {
-				case let .Next(value):
+				case let .value(value):
 					lock.lock()
 
 					otherValues.append(value)
@@ -95,10 +105,10 @@ extension SignalProtocol {
 
 					lock.unlock()
 
-				case let .Failed(error):
+				case let .failed(error):
 					observer.send(error: error)
 
-				case .Completed:
+				case .completed:
 					lock.lock()
 
 					otherCompleted = true
@@ -108,7 +118,7 @@ extension SignalProtocol {
 
 					lock.unlock()
 
-				case .Interrupted:
+				case .interrupted:
 					observer.sendInterrupted()
 				}
 			}
@@ -121,32 +131,14 @@ extension SignalProtocol {
 extension SignalProducerProtocol {
 	/// Sends each value that occurs on `producer` combined with each value that
 	/// occurs on `otherProducer` (repeats included).
-	private func permute<U>(with otherProducer: SignalProducer<U, Error>) -> SignalProducer<(Value, U), Error> {
-		// This should be the implementation of this method:
-		// return lift(Signal.permute(with:))(otherProducer)
-		//
-		// However, due to a Swift miscompilation (with `-O`) we need to inline `lift` here.
-		// See https://github.com/ReactiveCocoa/ReactiveCocoa/issues/2751 for more details.
-		//
-		// This can be reverted once tests with -O don't crash.
-
-		return SignalProducer { observer, outerDisposable in
-			self.startWithSignal { signal, disposable in
-				outerDisposable.add(disposable)
-
-				otherProducer.startWithSignal { otherSignal, otherDisposable in
-					outerDisposable.add(otherDisposable)
-
-					signal.permute(with: otherSignal).observe(observer)
-				}
-			}
-		}
+	fileprivate func permute<U>(with otherProducer: SignalProducer<U, Error>) -> SignalProducer<(Value, U), Error> {
+		return lift(Signal.permute(with:))(otherProducer)
 	}
 	
 	/// Sends a boolean of whether the producer succeeded or failed.
 	internal func succeeded() -> SignalProducer<Bool, NoError> {
 		return self
-			.then(.init(value: true))
+			.then(SignalProducer<Bool, Error>.init(value: true))
 			.flatMapError { _ in .init(value: false) }
 	}
 }
@@ -155,7 +147,6 @@ extension SignalProducerProtocol where Value: SignalProducerProtocol, Error == V
 	/// Sends all permutations of the values from the inner producers, as they arrive.
 	///
 	/// If no producers are received, sends a single empty array then completes.
-	@warn_unused_result(message="Did you forget to call `start` on the producer?")
 	internal func permute() -> SignalProducer<[Value.Value], Error> {
 		return self
 			.collect()
@@ -187,33 +178,33 @@ extension SignalProtocol where Value: EventProtocol, Value.Error == Error {
 
 			return self.observe { event in
 				switch event {
-				case let .Next(innerEvent):
+				case let .value(innerEvent):
 					switch innerEvent.event {
-					case let .Next(value):
+					case let .value(value):
 						receivedValue = true
 						observer.send(value: value)
 
-					case let .Failed(error):
+					case let .failed(error):
 						receivedError = error
 
-					case .Completed:
+					case .completed:
 						observer.sendCompleted()
 
-					case .Interrupted:
+					case .interrupted:
 						observer.sendInterrupted()
 					}
 
-				case let .Failed(error):
+				case let .failed(error):
 					observer.send(error: error)
 
-				case .Completed:
-					if let receivedError = receivedError where !receivedValue {
+				case .completed:
+					if let receivedError = receivedError, !receivedValue {
 						observer.send(error: receivedError)
 					}
 
 					observer.sendCompleted()
 
-				case .Interrupted:
+				case .interrupted:
 					observer.sendInterrupted()
 				}
 			}
@@ -260,35 +251,52 @@ extension URL {
 		return .failure(.readFailed(self, error))
 	}
 
-	public var carthage_absoluteString: String {
-		return absoluteString!
-	}
-
-	public func hasSubdirectory(possibleSubdirectory: URL) -> Bool {
+	public func hasSubdirectory(_ possibleSubdirectory: URL) -> Bool {
 		let standardizedSelf = self.standardizedFileURL
 		let standardizedOther = possibleSubdirectory.standardizedFileURL
 
-		let path = standardizedSelf.carthage_pathComponents
-		let otherPath = standardizedOther.carthage_pathComponents
+		let path = standardizedSelf.pathComponents
+		let otherPath = standardizedOther.pathComponents
 		if scheme == standardizedOther.scheme && path.count <= otherPath.count {
 			return Array(otherPath[path.indices]) == path
 		}
 
 		return false
 	}
+
+	/// Returns the first `URL` to match `<self>/Headers/*-Swift.h`. Otherwise `nil`.
+	internal func swiftHeaderURL() -> URL? {
+		let headersURL = self.appendingPathComponent("Headers", isDirectory: true).resolvingSymlinksInPath()
+		let dirContents = try? FileManager.default.contentsOfDirectory(at: headersURL, includingPropertiesForKeys: [], options: [])
+		return dirContents?.filter { $0.absoluteString.contains("-Swift.h") }.first
+	}
+
+	/// Returns the first `URL` to match `<self>/Modules/*.swiftmodule`. Otherwise `nil`.
+	internal func swiftmoduleURL() -> URL? {
+		let headersURL = self.appendingPathComponent("Modules", isDirectory: true).resolvingSymlinksInPath()
+		let dirContents = try? FileManager.default.contentsOfDirectory(at: headersURL, includingPropertiesForKeys: [], options: [])
+		return dirContents?.filter { $0.absoluteString.contains("swiftmodule") }.first
+	}
 }
 
-extension FileManager {
+extension FileManager: ReactiveExtensionsProvider {
+	@available(*, deprecated, message: "Use reactive.enumerator instead")
+	public func carthage_enumerator(at url: URL, includingPropertiesForKeys keys: [URLResourceKey]? = nil, options: FileManager.DirectoryEnumerationOptions = [], catchErrors: Bool = false) -> SignalProducer<(FileManager.DirectoryEnumerator, URL), CarthageError> {
+		return reactive.enumerator(at: url, includingPropertiesForKeys: keys, options: options, catchErrors: catchErrors)
+	}
+}
+
+extension Reactive where Base: FileManager {
 	/// Creates a directory enumerator at the given URL. Sends each URL
 	/// enumerated, along with the enumerator itself (so it can be introspected
 	/// and modified as enumeration progresses).
-	public func carthage_enumerator(at url: URL, includingPropertiesForKeys keys: [String], options: NSDirectoryEnumerationOptions = [], catchErrors: Bool = false) -> SignalProducer<(NSDirectoryEnumerator, URL), CarthageError> {
-		return SignalProducer { observer, disposable in
-			let enumerator = self.enumerator(at: url, includingPropertiesForKeys: keys, options: options) { (url, error) in
+	public func enumerator(at url: URL, includingPropertiesForKeys keys: [URLResourceKey]? = nil, options: FileManager.DirectoryEnumerationOptions = [], catchErrors: Bool = false) -> SignalProducer<(FileManager.DirectoryEnumerator, URL), CarthageError> {
+		return SignalProducer { [base = self.base] observer, disposable in
+			let enumerator = base.enumerator(at: url, includingPropertiesForKeys: keys, options: options) { (url, error) in
 				if catchErrors {
 					return true
 				} else {
-					observer.send(error: CarthageError.readFailed(url, error))
+					observer.send(error: CarthageError.readFailed(url, error as NSError))
 					return false
 				}
 			}!
@@ -305,12 +313,82 @@ extension FileManager {
 			observer.sendCompleted()
 		}
 	}
+
+	/// Creates a temporary directory with the given template name. Sends the
+	/// URL of the temporary directory and completes if successful, else errors.
+	///
+	/// The template name should adhere to the format required by the mkdtemp()
+	/// function.
+	public func createTemporaryDirectoryWithTemplate(_ template: String) -> SignalProducer<URL, CarthageError> {
+		return SignalProducer.attempt { [base = self.base] () -> Result<String, CarthageError> in
+			let temporaryDirectory: NSString
+			if #available(macOS 10.12, *) {
+				temporaryDirectory = base.temporaryDirectory.path as NSString
+			} else {
+				temporaryDirectory = NSTemporaryDirectory() as NSString
+			}
+
+			var temporaryDirectoryTemplate: ContiguousArray<CChar> = temporaryDirectory.appendingPathComponent(template).utf8CString
+
+			let result: UnsafeMutablePointer<Int8>? = temporaryDirectoryTemplate.withUnsafeMutableBufferPointer { (template: inout UnsafeMutableBufferPointer<CChar>) -> UnsafeMutablePointer<CChar> in
+				return mkdtemp(template.baseAddress)
+			}
+
+			if result == nil {
+				return .failure(.taskError(.posixError(errno)))
+			}
+
+			let temporaryPath = temporaryDirectoryTemplate.withUnsafeBufferPointer { (ptr: UnsafeBufferPointer<CChar>) -> String in
+				return String(validatingUTF8: ptr.baseAddress!)!
+			}
+
+			return .success(temporaryPath)
+			}
+			.map { URL(fileURLWithPath: $0, isDirectory: true) }
+	}
+}
+
+private let defaultSessionError = NSError(domain: CarthageKitBundleIdentifier,
+                                          code: 1,
+                                          userInfo: nil)
+
+extension Reactive where Base: URLSession {
+	/// Returns a SignalProducer which performs a downloadTask associated with an
+	/// `NSURLSession`
+	///
+	/// - parameters:
+	///   - request: A request that will be performed when the producer is
+	///              started
+	///
+	/// - returns: A producer that will execute the given request once for each
+	///            invocation of `start()`.
+	///
+	/// - note: This method will not send an error event in the case of a server
+	///         side error (i.e. when a response with status code other than
+	///         200...299 is received).
+	internal func download(with request: URLRequest) -> SignalProducer<(URL, URLResponse), AnyError> {
+		return SignalProducer { [base = self.base] observer, disposable in
+			let task = base.downloadTask(with: request) { url, response, error in
+				if let url = url, let response = response {
+					observer.send(value: (url, response))
+					observer.sendCompleted()
+				} else {
+					observer.send(error: AnyError(error ?? defaultSessionError))
+				}
+			}
+
+			disposable += {
+				task.cancel()
+			}
+			task.resume()
+		}
+	}
 }
 
 /// Creates a counted set from a sequence. The counted set is represented as a
 /// dictionary where the keys are elements from the sequence and values count
 /// how many times elements are present in the sequence.
-internal func buildCountedSet<S: SequenceType>(sequence: S) -> [S.Generator.Element: Int] {
+internal func buildCountedSet<S: Sequence>(_ sequence: S) -> [S.Iterator.Element: Int] {
 	return sequence.reduce([:]) { set, elem in
 		var set = set
 		if let count = set[elem] {

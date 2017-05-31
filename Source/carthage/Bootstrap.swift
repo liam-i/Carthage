@@ -10,21 +10,21 @@ import CarthageKit
 import Commandant
 import Foundation
 import Result
-import ReactiveCocoa
+import ReactiveSwift
 
-public struct BootstrapCommand: CommandType {
+public struct BootstrapCommand: CommandProtocol {
 	public let verb = "bootstrap"
 	public let function = "Check out and build the project's dependencies"
 
-	public func run(options: UpdateCommand.Options) -> Result<(), CarthageError> {
+	public func run(_ options: UpdateCommand.Options) -> Result<(), CarthageError> {
 		// Reuse UpdateOptions, since all `bootstrap` flags should correspond to
 		// `update` flags.
 		return options.loadProject()
 			.flatMap(.merge) { project -> SignalProducer<(), CarthageError> in
-				if !FileManager.`default`.fileExists(atPath: project.resolvedCartfileURL.carthage_path) {
+				if !FileManager.default.fileExists(atPath: project.resolvedCartfileURL.path) {
 					let formatting = options.checkoutOptions.colorOptions.formatting
 					carthage.println(formatting.bullets + "No Cartfile.resolved found, updating dependencies")
-					return project.updateDependencies(shouldCheckout: options.checkoutAfterUpdate)
+					return project.updateDependencies(shouldCheckout: options.checkoutAfterUpdate, buildOptions: options.buildOptions)
 				}
 				
 				let checkDependencies: SignalProducer<(), CarthageError>
@@ -32,8 +32,8 @@ public struct BootstrapCommand: CommandType {
 					checkDependencies = project
 						.loadResolvedCartfile()
 						.flatMap(.concat) { resolvedCartfile -> SignalProducer<(), CarthageError> in
-							let resolvedDependencyNames = resolvedCartfile.dependencies.map { $0.project.name.lowercaseString }
-							let unresolvedDependencyNames = Set(depsToUpdate.map { $0.lowercaseString }).subtract(resolvedDependencyNames)
+							let resolvedDependencyNames = resolvedCartfile.dependencies.keys.map { $0.name.lowercased() }
+							let unresolvedDependencyNames = Set(depsToUpdate.map { $0.lowercased() }).subtracting(resolvedDependencyNames)
 							
 							if !unresolvedDependencyNames.isEmpty {
 								return SignalProducer(error: .unresolvedDependencies(unresolvedDependencyNames.sorted()))
@@ -46,7 +46,7 @@ public struct BootstrapCommand: CommandType {
 				
 				let checkoutDependencies: SignalProducer<(), CarthageError>
 				if options.checkoutAfterUpdate {
-					checkoutDependencies = project.checkoutResolvedDependencies(options.dependenciesToUpdate)
+					checkoutDependencies = project.checkoutResolvedDependencies(options.dependenciesToUpdate, buildOptions: options.buildOptions)
 				} else {
 					checkoutDependencies = .empty
 				}

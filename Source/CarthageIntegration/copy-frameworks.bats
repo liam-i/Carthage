@@ -3,7 +3,7 @@
 setup() {
     cd $BATS_TMPDIR
     rm -rf CarthageCopyFrameworksFixture
-    git clone -b 1.1.0 https://github.com/ikesyo/CarthageCopyFrameworksFixture.git
+    git clone -b 2.0.0 https://github.com/ikesyo/CarthageCopyFrameworksFixture.git
     cd CarthageCopyFrameworksFixture
 }
 
@@ -15,7 +15,7 @@ teardown() {
     run carthage update --platform ios
     [ "$status" -eq 0 ]
 
-    run xcodebuild clean ${XCODE_ACTION:-test} -scheme CarthageCopyFrameworksFixture -sdk iphonesimulator -destination "name=iPhone 6s"
+    run xcodebuild clean build-for-testing -scheme CarthageCopyFrameworksFixture -sdk iphonesimulator -destination "name=iPhone 6s"
     [ "$status" -eq 0 ]
 
     ARCHIVE_APP_DIR=CarthageCopyFrameworksFixture.xcarchive/Products/Applications
