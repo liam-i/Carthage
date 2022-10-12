@@ -10,16 +10,13 @@ If you know exactly how to implement the feature being suggested or fix the bug 
 
 If you can’t make the change yourself, please open an issue after making sure that one isn’t already logged.
 
-## Target CarthageKit
-
-Unless you’re specifically improving something about the command-line experience of Carthage, please make code changes to [CarthageKit](README.md#carthagekit). This framework increases modularity, and allows other tools to integrate with Carthage more easily.
-
 ## Get started
 
 After checkout, you can run the following command from the cloned directory, and then open the workspace in Xcode:
 
 ```bash
-make bootstrap
+make xcodeproj && \
+  open Carthage.xcodeproj
 ```
 
 Then, to install your development copy of Carthage (and any local changes you've made) on your system, and test with your own repos:
@@ -65,3 +62,5 @@ If you’re interested in contributing code, please have a look at our [style gu
 If you have a case that is not covered in the style guide, simply do your best to match the style of the surrounding code.
 
 **Thanks for contributing! :boom::camel:**
+
+By submitting a pull request, you represent that you have the right to license your contribution to Carthage and the community, and agree by submitting the patch that your contributions are licensed under the MIT License.

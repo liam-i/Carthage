@@ -21,6 +21,8 @@ github "ReactiveCocoa/ReactiveCocoa" # GitHub.com
 github "https://enterprise.local/ghe/desktop/git-error-translations" # GitHub Enterprise
 ```
 
+`github` origin is for specifying by `owner/repo` form or using prebuilt binary download feature through its web API, so using `git` or `ssh` protocol for `github` origin does not make sense and will be an error.
+
 ##### Git repositories
 
 Other Git repositories are specified with the `git` keyword:
@@ -31,12 +33,16 @@ git "https://enterprise.local/desktop/git-error-translations2.git"
 
 ##### Binary only frameworks
 
-Dependencies that are only available as compiled binary `.framework`s are specified with the `binary` keyword and an https address that returns a binary project specification:
+Dependencies that are only available as compiled binary `.framework`s are specified with the `binary` keyword and as an `https://` URL, a `file://` URL, or a relative or an absolute path with no scheme, that returns a [binary project specification](#binary-project-specification):
 
 ```
-binary "https://my.domain.com/release/MyFramework.json"
+binary "https://my.domain.com/release/MyFramework.json"   // Remote Hosted
+binary "file:///some/Path/MyFramework.json"               // Locally hosted at file path
+binary "relative/path/MyFramework.json"                   // Locally hosted at relative path to CWD
+binary "/absolute/path/MyFramework.json"                  // Locally hosted at absolute path
 ```
 
+When downloading a binary only frameworks, `carthage` will take into account the user's `~/.netrc` file to determine authentication credentials if `--use-netrc` flag was set.
 
 #### Version requirement
 
@@ -84,6 +90,15 @@ git "file:///directory/to/project" "branch"
 
 # A binary only framework
 binary "https://my.domain.com/release/MyFramework.json" ~> 2.3
+
+# A binary only framework via file: url
+binary "file:///some/local/path/MyFramework.json" ~> 2.3
+
+# A binary only framework via local relative path from Current Working Directory to binary project specification
+binary "relative/path/MyFramework.json" ~> 2.3
+
+# A binary only framework via absolute path to binary project specification
+binary "/absolute/path/MyFramework.json" ~> 2.3
 ```
 
 ## Cartfile.private
@@ -128,17 +143,27 @@ If you need to reclaim disk space, you can safely delete this folder, or any of 
 
 For dependencies that do not have source code available, a binary project specification can be used to list the locations and versions of compiled frameworks.  This data **must** be available via `https` and could be served from a static file or dynamically.
 
+* The JSON specification file name **should** have the same name as the framework and **not** be named **Carthage.json**, (example: MyFramework.json).
 * The JSON structure is a top-level dictionary with the key-value pairs of version / location.
 * The version **must** be a semantic version.  Git branches, tags and commits are not valid.
 * The location **must** be an `https` url.
+
+#### Publish an XCFramework build alongside the framework build using an `alt=` query parameter
+
+To support users who build with `--use-xcframework`, create two zips: one containing the framework bundle(s) for your dependency, the other containing xcframework(s). Include "framework" or "xcframework" in the names of the zips, for example:  `MyFramework.framework.zip` and `MyFramework.xcframework.zip`. In your project specification, join the two URLs into one using a query string:
+
+	https://my.domain.com/release/1.0.0/MyFramework.framework.zip?alt=https://my.domain.com/release/1.0.0/MyFramework.xcframework.zip
+
+Starting in version 0.38.0, Carthage extracts any `alt=` URLs from the version specification. When `--use-xcframeworks` is passed, it prefers downloading URLs with "xcframework" in the name.
+
+**For backwards compatibility,** provide the plain frameworks build _first_ (i.e. not as an alt URL), so that older versions of Carthage use it. Carthage versions prior to 0.38.0 fail to download and extract XCFrameworks.
 
 #### Example binary project specification
 
 ```
 {
 	"1.0": "https://my.domain.com/release/1.0.0/framework.zip",
-	"1.0.1": "https://my.domain.com/release/1.0.1/framework.zip"
+	"1.0.1": "https://my.domain.com/release/1.0.1/MyFramework.framework.zip?alt=https://my.domain.com/release/1.0.1/MyFramework.xcframework.zip"
 }
 
 ```
-

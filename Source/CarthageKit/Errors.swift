@@ -1,11 +1,3 @@
-//
-//  Errors.swift
-//  Carthage
-//
-//  Created by Justin Spahr-Summers on 2014-10-24.
-//  Copyright (c) 2014 Carthage. All rights reserved.
-//
-
 import Foundation
 import ReactiveSwift
 import ReactiveTask
@@ -15,6 +7,17 @@ import XCDBLD
 /// Possible errors that can originate from Carthage.
 public enum CarthageError: Error {
 	public typealias VersionRequirement = (specifier: VersionSpecifier, fromDependency: Dependency?)
+
+	public struct DuplicatesInArchive: Equatable {
+
+		let dictionary: [URL: [URL]]
+	}
+
+	public struct XCFrameworkRequired: Equatable {
+		let productName: String
+		let commonArchitectures: Set<String>
+		let underlyingError: TaskError
+	}
 
 	/// One or more arguments was invalid.
 	case invalidArgument(description: String)
@@ -32,6 +35,9 @@ public enum CarthageError: Error {
 	/// a dependency.
 	case requiredVersionNotFound(Dependency, VersionSpecifier)
 
+	/// No valid versions could be found, given the list of dependencies to update
+	case unsatisfiableDependencyList([String])
+
 	/// No entry could be found in Cartfile for a dependency with this name.
 	case unknownDependencies([String])
 
@@ -47,24 +53,27 @@ public enum CarthageError: Error {
 	/// Failed to write a file or directory at the given URL.
 	case writeFailed(URL, NSError?)
 
+	/// No available simulators could be found
+	case noAvailableSimulators(platformName: String)
+
 	/// An error occurred parsing a Carthage file or task result
 	case parseError(description: String)
 
 	/// An error occurred parsing the binary-only framework definition file
 	case invalidBinaryJSON(URL, BinaryJSONError)
 
-	// An expected environment variable wasn't found.
+	/// An expected environment variable wasn't found.
 	case missingEnvironmentVariable(variable: String)
 
-	// An error occurred reading a framework's architectures.
+	/// An error occurred reading a framework's architectures.
 	case invalidArchitectures(description: String)
 
-	// An error occurred reading a dSYM or framework's UUIDs.
+	/// An error occurred reading a dSYM or framework's UUIDs.
 	case invalidUUIDs(description: String)
 
 	/// The project is not sharing any framework schemes, so Carthage cannot
 	/// discover them.
-	case noSharedFrameworkSchemes(Dependency, Set<Platform>)
+	case noSharedFrameworkSchemes(Dependency, Set<SDK>)
 
 	/// The project is not sharing any schemes, so Carthage cannot discover
 	/// them.
@@ -77,7 +86,7 @@ public enum CarthageError: Error {
 	/// other cartfiles.
 	case duplicateDependencies([DuplicateDependency])
 
-	// There was a cycle between dependencies in the associated graph.
+	/// There was a cycle between dependencies in the associated graph.
 	case dependencyCycle([Dependency: Set<Dependency>])
 
 	/// A request to the GitHub API failed.
@@ -87,15 +96,31 @@ public enum CarthageError: Error {
 
 	case buildFailed(TaskError, log: URL?)
 
+	case unknownFrameworkSwiftVersion(String)
+
 	/// An error occurred while shelling out.
 	case taskError(TaskError)
 
 	/// An internal error occurred
 	case internalError(description: String)
+
+	/// Cartfile.resolved contains incompatible versions
+	case invalidResolvedCartfile([CompatibilityInfo])
+
+	/// An archive (.zip, .gz, .bz2 ...) contains binaries that would
+	/// be copied to the same destination path
+	case duplicatesInArchive(duplicates: DuplicatesInArchive)
+
+	/// (cause)
+	///
+	/// Building universal frameworks with common architectures is not possible.
+	/// 	The device and simulator slices for "(productName)" both build for: (commonArchitectures)
+	/// Rebuild with --use-xcframeworks to create an xcframework bundle instead.
+	case xcframeworkRequired(XCFrameworkRequired)
 }
 
-public extension CarthageError {
-	init(scannableError: ScannableError) {
+extension CarthageError {
+	public init(scannableError: ScannableError) {
 		self = .parseError(description: "\(scannableError)")
 	}
 }
@@ -105,7 +130,7 @@ private func == (_ lhs: CarthageError.VersionRequirement, _ rhs: CarthageError.V
 }
 
 extension CarthageError: Equatable {
-	public static func == (_ lhs: CarthageError, _ rhs: CarthageError) -> Bool {
+	public static func == (_ lhs: CarthageError, _ rhs: CarthageError) -> Bool { // swiftlint:disable:this cyclomatic_complexity function_body_length
 		switch (lhs, rhs) {
 		case let (.invalidArgument(left), .invalidArgument(right)):
 			return left == right
@@ -122,6 +147,9 @@ extension CarthageError: Equatable {
 
 		case let (.requiredVersionNotFound(left, leftVersion), .requiredVersionNotFound(right, rightVersion)):
 			return left == right && leftVersion == rightVersion
+
+		case let (.unsatisfiableDependencyList(left), .unsatisfiableDependencyList(right)):
+			return left == right
 
 		case let (.repositoryCheckoutFailed(la, lb, lc), .repositoryCheckoutFailed(ra, rb, rc)):
 			return la == ra && lb == rb && lc == rc
@@ -149,10 +177,16 @@ extension CarthageError: Equatable {
 
 		case let (.noSharedSchemes(la, lb), .noSharedSchemes(ra, rb)):
 			guard la == ra else { return false }
+
 			switch (lb, rb) {
-			case (nil, nil): return true
-			case let ((lb1, lb2)?, (rb1, rb2)?): return lb1 == rb1 && lb2 == rb2
-			default: return false
+			case (nil, nil):
+				return true
+
+			case let ((lb1, lb2)?, (rb1, rb2)?):
+				return lb1 == rb1 && lb2 == rb2
+
+			default:
+				return false
 			}
 
 		case let (.duplicateDependencies(left), .duplicateDependencies(right)):
@@ -171,6 +205,12 @@ extension CarthageError: Equatable {
 			return left == right
 
 		case let (.internalError(left), .internalError(right)):
+			return left == right
+
+		case let (.duplicatesInArchive(left), .duplicatesInArchive(right)):
+			return left == right
+
+		case let (.xcframeworkRequired(left), .xcframeworkRequired(right)):
 			return left == right
 
 		default:
@@ -206,8 +246,12 @@ extension CarthageError: CustomStringConvertible {
 
 			return description
 
+		case let .noAvailableSimulators(platformName):
+			return "Could not find any available simulators for \(platformName)"
+
 		case let .incompatibleRequirements(dependency, first, second):
-			let requirement: (VersionRequirement) -> String = { specifier, fromDependency in
+			let requirement: (VersionRequirement) -> String = { arg in
+				let (specifier, fromDependency) = arg
 				return "\(specifier)" + (fromDependency.map { " (\($0))" } ?? "")
 			}
 			return "Could not pick a version for \(dependency), due to mutually incompatible requirements:\n\t\(requirement(first))\n\t\(requirement(second))"
@@ -217,6 +261,10 @@ extension CarthageError: CustomStringConvertible {
 
 		case let .requiredVersionNotFound(dependency, specifier):
 			return "No available version for \(dependency) satisfies the requirement: \(specifier)"
+
+		case let .unsatisfiableDependencyList(subsetList):
+			let subsetString = subsetList.map { "\t" + $0 }.joined(separator: "\n")
+			return "No valid versions could be found that restrict updates to:\n\(subsetString)"
 
 		case let .repositoryCheckoutFailed(workingDirectoryURL, reason, underlyingError):
 			var description = "Failed to check out repository into \(workingDirectoryURL.path): \(reason)"
@@ -245,7 +293,7 @@ extension CarthageError: CustomStringConvertible {
 		case let .noSharedFrameworkSchemes(dependency, platforms):
 			var description = "Dependency \"\(dependency.name)\" has no shared framework schemes"
 			if !platforms.isEmpty {
-				let platformsString = platforms.map { $0.description }.joined(separator: ", ")
+				let platformsString = Set(platforms.map { $0.platformSimulatorlessFromHeuristic }).joined(separator: ", ")
 				description += " for any of the platforms: \(platformsString)"
 			}
 
@@ -280,7 +328,7 @@ extension CarthageError: CustomStringConvertible {
 
 		case let .dependencyCycle(graph):
 			let prettyGraph = graph
-				.map { (project, dependencies) in
+				.map { project, dependencies in
 					let prettyDependencies = dependencies
 						.map { $0.name }
 						.joined(separator: ", ")
@@ -301,7 +349,8 @@ extension CarthageError: CustomStringConvertible {
 			return "No entry found for \(names.count > 1 ? "dependencies" : "dependency") \(names.joined(separator: ", ")) in Cartfile."
 
 		case let .unresolvedDependencies(names):
-			return "No entry found for \(names.count > 1 ? "dependencies" : "dependency") \(names.joined(separator: ", ")) in Cartfile.resolved – please run `carthage update` if the dependency is contained in the project's Cartfile."
+			return "No entry found for \(names.count > 1 ? "dependencies" : "dependency") \(names.joined(separator: ", ")) in Cartfile.resolved – "
+				+ "please run `carthage update` if the dependency is contained in the project's Cartfile."
 
 		case let .buildFailed(taskError, log):
 			var message = "Build Failed\n"
@@ -311,10 +360,15 @@ extension CarthageError: CustomStringConvertible {
 			} else {
 				message += "\t" + taskError.description + "\n"
 			}
+
 			message += "\nThis usually indicates that project itself failed to compile."
 			if let log = log {
 				message += " Please check the xcodebuild log for more details: \(log.path)"
 			}
+
+			return message
+
+		case .unknownFrameworkSwiftVersion(let message):
 			return message
 
 		case let .taskError(taskError):
@@ -322,6 +376,36 @@ extension CarthageError: CustomStringConvertible {
 
 		case let .internalError(description):
 			return description
+
+		case let .invalidResolvedCartfile(incompatibilities):
+			var message = "The following incompatibilities were found in Cartfile.resolved:\n"
+			message += incompatibilities
+				.sorted { $0.dependency.name < $1.dependency.name }
+				.flatMap { incompatibility -> [String] in
+					let sortedRequirements = incompatibility
+						.incompatibleRequirements
+						.sorted { $0.0.name < $1.0.name }
+					return sortedRequirements.map { dependency, version in
+						return "* \(incompatibility.dependency.name) \(incompatibility.pinnedVersion) is incompatible with \(dependency.name) \(version)"
+					}
+				}
+				.joined(separator: "\n")
+			return message
+
+		case let .duplicatesInArchive(duplicates):
+			let prettyDupeList = duplicates.dictionary
+				.map { "* \t\($0.value.map{ url in return url.absoluteString }.joined(separator: "\n\t")) \n\t\tto:\n\t\($0.key)" }
+				.joined(separator: "\n")
+			return "Invalid archive - Found multiple frameworks with the same unarchiving destination:\n\(prettyDupeList)"
+
+		case let .xcframeworkRequired(info):
+			let archs = info.commonArchitectures.joined(separator: ", ")
+			return [
+				"\(info.underlyingError)",
+				"Building universal frameworks with common architectures is not possible. " +
+					"The device and simulator slices for \"\(info.productName)\" both build for: \(archs)",
+				"Rebuild with --use-xcframeworks to create an xcframework bundle instead."
+			].joined(separator: "\n")
 		}
 	}
 }

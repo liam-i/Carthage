@@ -1,5 +1,5 @@
 /// A duplicate dependency, used in CarthageError.duplicateDependencies.
-public struct DuplicateDependency {
+public struct DuplicateDependency: Equatable {
 	/// The duplicate dependency
 	public let dependency: Dependency
 
@@ -33,10 +33,6 @@ extension DuplicateDependency: CustomStringConvertible {
 }
 
 extension DuplicateDependency: Comparable {
-	public static func == (_ lhs: DuplicateDependency, _ rhs: DuplicateDependency) -> Bool {
-		return lhs.dependency == rhs.dependency && lhs.locations == rhs.locations
-	}
-
 	public static func < (_ lhs: DuplicateDependency, _ rhs: DuplicateDependency) -> Bool {
 		if lhs.description < rhs.description {
 			return true
@@ -44,16 +40,14 @@ extension DuplicateDependency: Comparable {
 
 		if lhs.locations.count < rhs.locations.count {
 			return true
-		}
-		else if lhs.locations.count > rhs.locations.count {
+		} else if lhs.locations.count > rhs.locations.count {
 			return false
 		}
 
 		for (lhsLocation, rhsLocation) in zip(lhs.locations, rhs.locations) {
 			if lhsLocation < rhsLocation {
 				return true
-			}
-			else if lhsLocation > rhsLocation {
+			} else if lhsLocation > rhsLocation {
 				return false
 			}
 		}

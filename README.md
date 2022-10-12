@@ -1,42 +1,74 @@
 ![](Logo/PNG/header.png)
 
-# Carthage [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://raw.githubusercontent.com/Carthage/Carthage/master/LICENSE.md) [![GitHub release](https://img.shields.io/github/release/carthage/carthage.svg)](https://github.com/Carthage/Carthage/releases)
+# Carthage [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://raw.githubusercontent.com/Carthage/Carthage/master/LICENSE.md) [![GitHub release](https://img.shields.io/github/release/carthage/carthage.svg)](https://github.com/Carthage/Carthage/releases) [![Reviewed by Hound](https://img.shields.io/badge/Reviewed_by-Hound-8E64B0.svg)](https://houndci.com)
 
 Carthage is intended to be the simplest way to add frameworks to your Cocoa application.
 
-The basic [workflow](#adding-frameworks-to-an-application) looks something like this:
-
-1. Create a [Cartfile][] that lists the frameworks you’d like to use in your project.
-1. [Run Carthage](#adding-frameworks-to-an-application), which fetches and builds each framework you’ve listed.
-1. Drag the built `.framework` binaries into your application’s Xcode project.
-
 Carthage builds your dependencies and provides you with binary frameworks, but you retain full control over your project structure and setup. Carthage does not automatically modify your project files or your build settings.
 
-## Differences between Carthage and CocoaPods
+- [Quick Start](#quick-start)
+- [Installing Carthage](#installing-carthage)
+- [Adding frameworks to an application](#adding-frameworks-to-an-application)
+	- [Getting started](#getting-started)
+		- [Building platform-independent XCFrameworks](#building-platform-independent-xcframeworks-xcode-12-and-above)
+			- [Migrating a project from framework bundles to XCFrameworks](#migrating-a-project-from-framework-bundles-to-xcframeworks)
+		- [Building platform-specific framework bundles](#building-platform-specific-framework-bundles-default-for-xcode-11-and-below)
+			- [If you're building for macOS](#if-youre-building-for-macos)
+			- [If you're building for iOS, tvOS, or watchOS](#if-youre-building-for-ios-tvos-or-watchos)
+		- [For all platforms](#for-all-platforms)
+		- [(Optionally) Add build phase to warn about outdated dependencies](#optionally-add-build-phase-to-warn-about-outdated-dependencies)
+		- [Swift binary framework download compatibility](#swift-binary-framework-download-compatibility)
+	- [Running a project that uses Carthage](#running-a-project-that-uses-carthage)
+	- [Adding frameworks to unit tests or a framework](#adding-frameworks-to-unit-tests-or-a-framework)
+	- [Upgrading frameworks](#upgrading-frameworks)
+		- [Experimental Resolver](#experimental-resolver)
+	- [Nested dependencies](#nested-dependencies)
+	- [Using submodules for dependencies](#using-submodules-for-dependencies)
+	- [Automatically rebuilding dependencies](#automatically-rebuilding-dependencies)
+	- [Caching builds](#caching-builds)
+	- [Bash/Zsh/Fish completion](#bashzshfish-completion)
+- [Supporting Carthage for your framework](#supporting-carthage-for-your-framework)
+	- [Share your Xcode schemes](#share-your-xcode-schemes)
+	- [Resolve build failures](#resolve-build-failures)
+	- [Tag stable releases](#tag-stable-releases)
+	- [Archive prebuilt frameworks into zip files](#archive-prebuilt-frameworks-into-zip-files)
+		- [Use travis-ci to upload your tagged prebuilt frameworks](#use-travis-ci-to-upload-your-tagged-prebuilt-frameworks)
+	- [Build static frameworks to speed up your app’s launch times](#build-static-frameworks-to-speed-up-your-apps-launch-times)
+	- [Declare your compatibility](#declare-your-compatibility)
+- [Known issues](#known-issues)
+	- [DWARFs symbol problem](#dwarfs-symbol-problem)
+- [CarthageKit](#carthagekit)
+- [Differences between Carthage and CocoaPods](#differences-between-carthage-and-cocoapods)
+- [License](#license)
 
-[CocoaPods](http://cocoapods.org/) is a long-standing dependency manager for Cocoa. So why was Carthage created?
+## Quick Start
 
-Firstly, CocoaPods (by default) automatically creates and updates an Xcode workspace for your application and all dependencies. Carthage builds framework binaries using `xcodebuild`, but leaves the responsibility of integrating them up to the user. CocoaPods’ approach is easier to use, while Carthage’s is flexible and unintrusive.
+1. Get Carthage by running `brew install carthage` or choose [another installation method](#installing-carthage)
+1. Create a [Cartfile][] in the same directory where your `.xcodeproj` or `.xcworkspace` is
+1. List the desired dependencies in the [Cartfile][], for example:
 
-The goal of CocoaPods is listed in its [README](https://github.com/CocoaPods/CocoaPods/blob/1703a3464674baecf54bd7e766f4b37ed8fc43f7/README.md) as follows:
+	```
+	github "Alamofire/Alamofire" ~> 5.5
+	```
 
-> … to improve discoverability of, and engagement in, third party open-source libraries, by creating a more centralized ecosystem.
+1. Run `carthage update --use-xcframeworks`
+1. A `Cartfile.resolved` file and a `Carthage` directory will appear in the same directory where your `.xcodeproj` or `.xcworkspace` is
+1. Drag the built `.xcframework` bundles from `Carthage/Build` into the "Frameworks and Libraries" section of your application’s Xcode project.
+1. If you are using Carthage for an application, select "Embed & Sign", otherwise "Do Not Embed".
 
-By contrast, Carthage has been created as a _decentralized_ dependency manager. There is no central list of projects, which reduces maintenance work and avoids any central point of failure. However, project discovery is more difficult—users must resort to GitHub’s [Trending](https://github.com/trending?l=swift) pages or similar.
-
-CocoaPods projects must also have what’s known as a [podspec](http://guides.cocoapods.org/syntax/podspec.html) file, which includes metadata about the project and specifies how it should be built. Carthage uses `xcodebuild` to build dependencies, instead of integrating them into a single workspace, it doesn’t have a similar specification file but your dependencies must include their own Xcode project that describes how to build their products.
-
-Ultimately, we created Carthage because we wanted the simplest tool possible—a dependency manager that gets the job done without taking over the responsibility of Xcode, and without creating extra work for framework authors. CocoaPods offers many amazing features that Carthage will never have, at the expense of additional complexity.
+For an in depth guide, read on from [Adding frameworks to an application](#adding-frameworks-to-an-application)
 
 ## Installing Carthage
 
 There are multiple options for installing Carthage:
 
-* **Installer:** Download and run the `Carthage.pkg` file for the latest [release](https://github.com/Carthage/Carthage/releases), then follow the on-screen instructions.
+* **Installer:** Download and run the `Carthage.pkg` file for the latest [release](https://github.com/Carthage/Carthage/releases), then follow the on-screen instructions. If you are installing the pkg via CLI, you might need to run `sudo chown -R $(whoami) /usr/local` first.
 
-* **Homebrew:** You can use [Homebrew](http://brew.sh) and install the `carthage` tool on your system simply by running `brew update` and `brew install carthage`. (note: if you previously installed the binary version of Carthage, you should delete `/Library/Frameworks/CarthageKit.framework`).
+* **Homebrew:** You can use [Homebrew](https://brew.sh) and install the `carthage` tool on your system simply by running `brew update` and `brew install carthage`. (note: if you previously installed the binary version of Carthage, you should delete `/Library/Frameworks/CarthageKit.framework`).
 
-* **From source:** If you’d like to run the latest development version (which may be highly unstable or incompatible), simply clone the `master` branch of the repository, then run `make install`. Requires Xcode 8.2 (Swift 3.0.2).
+* **MacPorts:** You can use [MacPorts](https://www.macports.org/) and install the `carthage` tool on your system simply by running `sudo port selfupdate` and `sudo port install carthage`. (note: if you previously installed the binary version of Carthage, you should delete `/Library/Frameworks/CarthageKit.framework`).
+
+* **From source:** If you’d like to run the latest development version (which may be highly unstable or incompatible), simply clone the `master` branch of the repository, then run `make install`. Requires Xcode 10.0 (Swift 4.2).
 
 ## Adding frameworks to an application
 
@@ -44,47 +76,110 @@ Once you have Carthage [installed](#installing-carthage), you can begin adding f
 
 ### Getting started
 
-##### If you're building for OS X
+#### Building platform-independent XCFrameworks (Xcode 12 and above)
 
 1. Create a [Cartfile][] that lists the frameworks you’d like to use in your project.
-1. Run `carthage update`. This will fetch dependencies into a [Carthage/Checkouts][] folder and build each one or download a pre-compiled framework.
-1. On your application targets’ “General” settings tab, in the “Embedded Binaries” section, drag and drop each framework you want to use from the [Carthage/Build][] folder on disk.
+1. Run `carthage update --use-xcframeworks`. This will fetch dependencies into a [Carthage/Checkouts][] folder and build each one or download a pre-compiled XCFramework.
+1. On your application targets’ _General_ settings tab, in the _Frameworks, Libraries, and Embedded Content_ section, drag and drop each XCFramework you want to use from the [Carthage/Build][] folder on disk.
+
+##### Migrating a project from framework bundles to XCFrameworks
+
+We encourage using XCFrameworks as of version 0.37.0 (January 2021), and require XCFrameworks when building on an Apple Silicon Mac. Switching from discrete framework bundles to XCFrameworks requires a few changes to your project:
+
+<details>
+  <summary>Migration steps</summary>
+
+1. Delete your `Carthage/Build` folder to remove any existing framework bundles.
+1. Build new XCFrameworks by running `carthage build --use-xcframeworks`. Any other arguments you build with can be provided like normal.
+1. Remove references to the old frameworks in each of your targets:
+    - Delete references to Carthage frameworks from the target's _Frameworks, Libraries, and Embedded Content_ section and/or its _Link Binary with Libraries_ build phase.
+    - Delete references to Carthage frameworks from any _Copy Files_ build phases.
+    - Delete the target's `carthage copy-frameworks` build phase, if present.
+1. Add references to XCFrameworks in each of your targets:
+    - For an application target: In the _General_ settings tab, in the _Frameworks, Libraries, and Embedded Content_ section, drag and drop each XCFramework you use from the [Carthage/Build][] folder on disk.
+    - For a framework target: In the _Build Phases_ tab, in a _Link Binary with Libraries_ phase, drag and drop each XCFramework you use from the [Carthage/Build][] folder on disk.
+
+</details>
+
+#### Building platform-specific framework bundles (default for Xcode 11 and below)
+
+**Xcode 12+ incompatibility**: Multi-architecture platforms are not supported when building framework bundles in Xcode 12 and above. Prefer [building with XCFrameworks](#building-platform-independent-xcframeworks-xcode-12-and-above). If you need to build discrete framework bundles, [use a workaround xcconfig file](Documentation/Xcode12Workaround.md).
+
+##### If you're building for macOS
+
+<details>
+	<summary>macOS-specific instructions</summary>
+
+1. Create a [Cartfile][] that lists the frameworks you’d like to use in your project.
+1. Run `carthage update --platform macOS`. This will fetch dependencies into a [Carthage/Checkouts][] folder and build each one or download a pre-compiled framework.
+1. On your application targets’ _General_ settings tab, in the _Embedded Binaries_ section, drag and drop each framework you want to use from the [Carthage/Build][] folder on disk.
 
 Additionally, you'll need to copy debug symbols for debugging and crash reporting on OS X.
 
-1. On your application target’s “Build Phases” settings tab, click the “+” icon and choose “New Copy Files Phase”.
-1. Click the “Destination” drop-down menu and select “Products Directory”.
+1. On your application target’s _Build Phases_ settings tab, click the _+_ icon and choose _New Copy Files Phase_.
+1. Click the _Destination_ drop-down menu and select _Products Directory_.
 1. For each framework you’re using, drag and drop its corresponding dSYM file.
+
+</details>
 
 ##### If you're building for iOS, tvOS, or watchOS
 
+<details>
+	<summary>Platform-specific instructions</summary>
+
 1. Create a [Cartfile][] that lists the frameworks you’d like to use in your project.
 1. Run `carthage update`. This will fetch dependencies into a [Carthage/Checkouts][] folder, then build each one or download a pre-compiled framework.
-1. On your application targets’ “General” settings tab, in the “Linked Frameworks and Libraries” section, drag and drop each framework you want to use from the [Carthage/Build][] folder on disk.
-1. On your application targets’ “Build Phases” settings tab, click the “+” icon and choose “New Run Script Phase”. Create a Run Script in which you specify your shell (ex: `/bin/sh`), add the following contents to the script area below the shell:
+1. Open your application targets’ _General_ settings tab. For Xcode 11.0 and higher, in the "Frameworks, Libraries, and Embedded Content" section, drag and drop each framework you want to use from the [Carthage/Build][] folder on disk. Then, in the "Embed"  section, select "Do Not Embed" from the pulldown menu for each item added. For Xcode 10.x and lower, in the "Linked Frameworks and Libraries" section, drag and drop each framework you want to use from the [Carthage/Build][] folder on disk.
+1. On your application targets’ _Build Phases_ settings tab, click the _+_ icon and choose _New Run Script Phase_. Create a Run Script in which you specify your shell (ex: `/bin/sh`), add the following contents to the script area below the shell:
 
-  ```sh
-  /usr/local/bin/carthage copy-frameworks
-  ```
+    ```sh
+    /usr/local/bin/carthage copy-frameworks
+    ```
+1. Create a file named `input.xcfilelist` and a file named `output.xcfilelist`
 
-  and add the paths to the frameworks you want to use under “Input Files”, e.g.:
+1. Add the paths to the frameworks you want to use to your `input.xcfilelist`. For example:
 
-  ```
-  $(SRCROOT)/Carthage/Build/iOS/Box.framework
-  $(SRCROOT)/Carthage/Build/iOS/Result.framework
-  $(SRCROOT)/Carthage/Build/iOS/ReactiveCocoa.framework
-  ```
-  This script works around an [App Store submission bug](http://www.openradar.me/radar?id=6409498411401216) triggered by universal binaries and ensures that necessary bitcode-related files and dSYMs are copied when archiving.
+    ```
+    $(SRCROOT)/Carthage/Build/iOS/Result.framework
+    $(SRCROOT)/Carthage/Build/iOS/ReactiveSwift.framework
+    $(SRCROOT)/Carthage/Build/iOS/ReactiveCocoa.framework
+    ```
+
+1. Add the paths to the copied frameworks to the `output.xcfilelist`. For example:
+
+    ```
+    $(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Result.framework
+    $(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/ReactiveSwift.framework
+    $(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/ReactiveCocoa.framework
+    ```
+
+    With output files specified alongside the input files, Xcode only needs to run the script when the input files have changed or the output files are missing. This means dirty builds will be faster when you haven't rebuilt frameworks with Carthage.
+
+1. Add the `input.xcfilelist` to the "Input File Lists" section of the Carthage run script phase
+1. Add the `output.xcfilelist` to the "Output File Lists" section of the Carthage run script phase
+
+This script works around an [App Store submission bug](http://www.openradar.me/radar?id=6409498411401216) triggered by universal binaries and ensures that necessary bitcode-related files and dSYMs are copied when archiving.
 
 With the debug information copied into the built products directory, Xcode will be able to symbolicate the stack trace whenever you stop at a breakpoint. This will also enable you to step through third-party code in the debugger.
 
 When archiving your application for submission to the App Store or TestFlight, Xcode will also copy these files into the dSYMs subdirectory of your application’s `.xcarchive` bundle.
+</details>
 
-##### For both platforms
+#### For all platforms
 
 Along the way, Carthage will have created some [build artifacts][Artifacts]. The most important of these is the [Cartfile.resolved][] file, which lists the versions that were actually built for each framework. **Make sure to commit your [Cartfile.resolved][]**, because anyone else using the project will need that file to build the same framework versions.
 
-##### Swift binary framework download compatibility
+#### (Optionally) Add build phase to warn about outdated dependencies
+
+You can add a Run Script phase to automatically warn you when one of your dependencies is out of date.
+
+1. On your application targets’ `Build Phases` settings tab, click the `+` icon and choose `New Run Script Phase`. Create a Run Script in which you specify your shell (ex: `/bin/sh`), add the following contents to the script area below the shell:
+
+```sh
+/usr/local/bin/carthage outdated --xcode-warnings 2>/dev/null
+```
+
+#### Swift binary framework download compatibility
 
 Carthage will check to make sure that downloaded Swift (and mixed Objective-C/Swift) frameworks were built with the same version of Swift that is in use locally. If there is a version mismatch, Carthage will proceed to build the framework from source. If the framework cannot be built from source, Carthage will fail.
 
@@ -102,17 +197,17 @@ After you’ve finished the above steps and pushed your changes, other users of 
 
 Using Carthage for the dependencies of any arbitrary target is fairly similar to [using Carthage for an application](#adding-frameworks-to-an-application). The main difference lies in how the frameworks are actually set up and linked in Xcode.
 
-Because unit test targets are missing the “Linked Frameworks and Libraries” section in their “General” settings tab, you must instead drag the [built frameworks][Carthage/Build] to the “Link Binaries With Libraries” build phase.
+Because unit test targets are missing the _Linked Frameworks and Libraries_ section in their _General_ settings tab, you must instead drag the [built frameworks][Carthage/Build] to the _Link Binaries With Libraries_ build phase.
 
-In the Test target under the "Build Settings" tab, add `@loader_path/Frameworks` to the "Runpath Search Paths" if it isn't already present.
+In the Test target under the _Build Settings_ tab, add `@loader_path/Frameworks` to the _Runpath Search Paths_ if it isn't already present.
 
-In rare cases, you may want to also copy each dependency into the build product (e.g., to embed dependencies within the outer framework, or make sure dependencies are present in a test bundle). To do this, create a new “Copy Files” build phase with the “Frameworks” destination, then add the framework reference there as well.
+In rare cases, you may want to also copy each dependency into the build product (e.g., to embed dependencies within the outer framework, or make sure dependencies are present in a test bundle). To do this, create a new _Copy Files_ build phase with the _Frameworks_ destination, then add the framework reference there as well. You shouldn't use the `carthage copy-frameworks` command since test bundles don't need frameworks stripped, and running concurrent instances of `copy-frameworks` (with parallel builds turn on) is not supported.
 
 ### Upgrading frameworks
 
 If you’ve modified your [Cartfile][], or you want to update to the newest versions of each framework (subject to the requirements you’ve specified), simply run the `carthage update` command again.
 
-If you only want to update one , or specific, dependencies, pass them as a space-separated list to the `update` command. e.g.
+If you only want to update one, or specific, dependencies, pass them as a space-separated list to the `update` command. e.g.
 
 ```
 carthage update Box
@@ -123,6 +218,17 @@ or
 ```
 carthage update Box Result
 ```
+
+##### Experimental Resolver
+
+A rewrite of the logic for upgrading frameworks was done with the aim of increasing speed and reducing memory usage. It is currently an opt-in feature. It can be used by passing `--new-resolver` to the update command, e.g.,
+
+```
+carthage update --new-resolver Box
+```
+
+If you are experiencing performance problems during updates, please give the new resolver a try
+
 
 ### Nested dependencies
 
@@ -148,7 +254,7 @@ Note that you should be [using submodules](#using-submodules-for-dependencies) b
 
 ### Caching builds
 
-By default Carthage will rebuild a dependency regardless of whether it's the same resolved version as before. Passing the `--cache-builds` will cause carthage to avoid rebuilding a dependency if it can. See information on [version files][VersionFile] for details on how carthage performs this caching.
+By default Carthage will rebuild a dependency regardless of whether it's the same resolved version as before. Passing the `--cache-builds` will cause carthage to avoid rebuilding a dependency if it can. See information on [version files][VersionFile] for details on how Carthage performs this caching.
 
 Note: At this time `--cache-builds` is incompatible with `--use-submodules`. Using both will result in working copy and committed changes to your submodule dependency not being correctly rebuilt. See [#1785](https://github.com/Carthage/Carthage/issues/1785) for details.
 
@@ -158,7 +264,7 @@ Auto completion of Carthage commands and options are available as documented in 
 
 ## Supporting Carthage for your framework
 
-**Carthage only officially supports dynamic frameworks**. Dynamic frameworks can be used on any version of OS X, but only on **iOS 8 or later**.
+**Carthage only officially supports dynamic frameworks**. Dynamic frameworks can be used on any version of OS X, but only on **iOS 8 or later**. Additionally, since version 0.30.0 Carthage supports **static** frameworks.
 
 Because Carthage has no centralized package list, and no project specification format, **most frameworks should build automatically**.
 
@@ -168,7 +274,7 @@ The specific requirements of any framework project are listed below.
 
 Carthage will only build Xcode schemes that are shared from your `.xcodeproj`. You can see if all of your intended schemes build successfully by running `carthage build --no-skip-current`, then checking the [Carthage/Build][] folder.
 
-If an important scheme is not built when you run that command, open Xcode and make sure that the [scheme is marked as “Shared,”](https://developer.apple.com/library/content/documentation/IDEs/Conceptual/xcode_guide-continuous_integration/ConfigureBots.html#//apple_ref/doc/uid/TP40013292-CH9-SW3) so Carthage can discover it.
+If an important scheme is not built when you run that command, open Xcode and make sure that the [scheme is marked as _Shared_](https://developer.apple.com/library/content/documentation/IDEs/Conceptual/xcode_guide-continuous_integration/ConfigureBots.html#//apple_ref/doc/uid/TP40013292-CH9-SW3), so Carthage can discover it.
 
 
 ### Resolve build failures
@@ -181,26 +287,35 @@ If you’re still not able to build your framework with Carthage, please [open a
 
 ### Tag stable releases
 
-Carthage determines which versions of your framework are available by searching through the tags published on the repository, and trying to interpret each tag name as a [semantic version](http://semver.org/). For example, in the tag `v1.2`, the semantic version is 1.2.0.
+Carthage determines which versions of your framework are available by searching through the tags published on the repository, and trying to interpret each tag name as a [semantic version](https://semver.org/). For example, in the tag `v1.2`, the semantic version is 1.2.0.
 
 Tags without any version number, or with any characters following the version number (e.g., `1.2-alpha-1`) are currently unsupported, and will be ignored.
 
-### Archive prebuilt frameworks into one zip file
+### Archive prebuilt frameworks into zip files
 
 Carthage can automatically use prebuilt frameworks, instead of building from scratch, if they are attached to a [GitHub Release](https://help.github.com/articles/about-releases/) on your project’s repository or via a binary project definition file.
 
-To offer prebuilt frameworks for a specific tag, the binaries for _all_ supported platforms should be zipped up together into _one_ archive, and that archive should be attached to a published Release corresponding to that tag. The attachment should include `.framework` in its name (e.g., `ReactiveCocoa.framework.zip`), to indicate to Carthage that it contains binaries.
+To offer prebuilt frameworks for a specific tag, the binaries for _all_ supported platforms should be zipped up together into _one_ archive, and that archive should be attached to a published Release corresponding to that tag. The attachment should include `.framework` in its name (e.g., `ReactiveCocoa.framework.zip`), to indicate to Carthage that it contains binaries. The directory structure of the archive is free form but, __frameworks should only appear once in the archive__ as they will be copied
+to `Carthage/Build/<platform>` based on their name (e.g. `ReactiveCocoa.framework`).
 
-You can perform the archiving operation above with the `carthage archive` command as follows:
+To offer prebuilt XCFrameworks, build with `--use-xcframeworks` and follow the same process to zip up all XCFrameworks into one archive. Include `.xcframework` in the attachment name. Starting in version 0.38.0, Carthage prefers downloading `.xcframework` attachments when `--use-xcframeworks` is passed.
+
+You can perform the archiving operation with carthage itself using:
 
 ```sh
-carthage build --no-skip-current
-carthage archive YourFrameworkName
+-carthage build --no-skip-current
+-carthage archive YourFrameworkName
+```
+
+or alternatively
+
+```sh
+carthage build --archive
 ```
 
 Draft Releases will be automatically ignored, even if they correspond to the desired tag.
 
-#### Use travis-ci to upload your tagged prebuild frameworks
+#### Use travis-ci to upload your tagged prebuilt frameworks
 
 It is possible to use travis-ci in order to build and upload your tagged releases.
 
@@ -243,8 +358,8 @@ It is possible to use travis-ci in order to build and upload your tagged release
 	```
 1. Run `travis setup releases`, follow documentation [here](https://docs.travis-ci.com/user/deployment/releases/)
 
-	This command will encode your github credentials into the .travis.yml file in order to let travis upload the release to github.com
-	When prompted for the file to upload, enter $FRAMEWORK_NAME.framework.zip
+	This command will encode your GitHub credentials into the `.travis.yml` file in order to let travis upload the release to GitHub.com
+	When prompted for the file to upload, enter `$FRAMEWORK_NAME.framework.zip`
 
 1. Update the deploy section to run on tags:
 
@@ -268,7 +383,26 @@ It is possible to use travis-ci in order to build and upload your tagged release
 
 ### Build static frameworks to speed up your app’s launch times
 
-If you embed many dynamic frameworks into your app, its pre-main launch times may be quite slow. Carthage is able to help mitigate this by building your dynamic frameworks as static frameworks instead. Static frameworks can be linked directly into your application or merged together into a larger dynamic framework with a few simple modifications to your workflow, which can result in dramatic reductions in pre-main lauch times. See the [StaticFrameworks][StaticFrameworks] doc for details.
+If you embed many dynamic frameworks into your app, its pre-main launch times may be quite slow. Carthage is able to help mitigate this by building your dynamic frameworks as static frameworks instead. Static frameworks can be linked directly into your application or merged together into a larger dynamic framework with a few simple modifications to your workflow, which can result in dramatic reductions in pre-main launch times.
+
+#### Carthage 0.30.0 or higher
+
+Since version 0.30.0 Carthage project rolls out support for statically linked frameworks written in Swift or Objective-C, support for which has been introduced in Xcode 9.4. Please note however that it specifically says *frameworks*, hence Darwin bundles with **.framework** extension and statically linked object archives inside. Carthage does not currently support static *library* schemes, nor are there any plans to introduce their support in the future.
+
+The workflow differs barely:
+
+- You still need to tick your Carthage-compliant project's schemes as *shared* in *Product > Scheme > Manage Schemes...*, just as with dynamic binaries
+- You still need to link against static **.frameworks** in your project's *Build Phases* just as with dynamic binaries
+
+However:
+
+- In your Carthage-compliant project's Cocoa Framework target's *Build Settings*, *Linking* section, set **Mach-O Type** to **Static Library**
+- Your statically linked frameworks will be built at *./Carthage/Build/$(PLATFORM_NAME)/Static*
+- You should not add any of static frameworks as input/output files in **carthage copy-frameworks** *Build Phase*
+
+#### Carthage 0.29.0 or lower
+
+See the [StaticFrameworks][StaticFrameworks] doc for details.
 
 *Please note that a few caveats apply to this approach:*
 - Swift static frameworks are not officially supported by Apple
@@ -280,7 +414,7 @@ Want to advertise that your project can be used with Carthage? You can add a com
 
 [![Carthage compatible](https://img.shields.io/badge/Carthage-compatible-4BC51D.svg?style=flat)](https://github.com/Carthage/Carthage)
 
-… to your README, by simply inserting the following Markdown:
+… to your `README`, by simply inserting the following Markdown:
 
 ```markdown
 [![Carthage compatible](https://img.shields.io/badge/Carthage-compatible-4BC51D.svg?style=flat)](https://github.com/Carthage/Carthage)
@@ -295,6 +429,22 @@ Pre-built framework cannot be debugged using step execution on other machine tha
 Most of the functionality of the `carthage` command line tool is actually encapsulated in a framework named CarthageKit.
 
 If you’re interested in using Carthage as part of another tool, or perhaps extending the functionality of Carthage, take a look at the [CarthageKit][] source code to see if the API fits your needs.
+
+## Differences between Carthage and CocoaPods
+
+[CocoaPods](https://cocoapods.org/) is a long-standing dependency manager for Cocoa. So why was Carthage created?
+
+Firstly, CocoaPods (by default) automatically creates and updates an Xcode workspace for your application and all dependencies. Carthage builds framework binaries using `xcodebuild`, but leaves the responsibility of integrating them up to the user. CocoaPods’ approach is easier to use, while Carthage’s is flexible and unintrusive.
+
+The goal of CocoaPods is listed in its [README](https://github.com/CocoaPods/CocoaPods/blob/1703a3464674baecf54bd7e766f4b37ed8fc43f7/README.md) as follows:
+
+> … to improve discoverability of, and engagement in, third party open-source libraries, by creating a more centralized ecosystem.
+
+By contrast, Carthage has been created as a _decentralized_ dependency manager. There is no central list of projects, which reduces maintenance work and avoids any central point of failure. However, project discovery is more difficult—users must resort to GitHub’s [Trending](https://github.com/trending?l=swift) pages or similar.
+
+CocoaPods projects must also have what’s known as a [podspec](https://guides.cocoapods.org/syntax/podspec.html) file, which includes metadata about the project and specifies how it should be built. Carthage uses `xcodebuild` to build dependencies, instead of integrating them into a single workspace, it doesn’t have a similar specification file but your dependencies must include their own Xcode project that describes how to build their products.
+
+Ultimately, we created Carthage because we wanted the simplest tool possible—a dependency manager that gets the job done without taking over the responsibility of Xcode, and without creating extra work for framework authors. CocoaPods offers many amazing features that Carthage will never have, at the expense of additional complexity.
 
 ## License
 
